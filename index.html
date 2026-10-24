@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Energy Meter - Live Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #007bff; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+        .card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border-left: 5px solid #007bff; }
+        .card h3 { margin: 0; font-size: 14px; color: #666; }
+        .card p { font-size: 24px; font-weight: bold; margin: 10px 0 0 0; color: #222; }
+        .status-box { margin-top: 20px; padding: 10px; text-align: center; font-weight: bold; border-radius: 6px; background: #e2e3e5; }
+        .normal { background: #d4edda; color: #155724; }
+        .alert { background: #f8d7da; color: #721c24; }
+        .offline { background: #fff3cd; color: #856404; }
+        .controls { margin-top: 20px; text-align: center; display: flex; justify-content: center; gap: 10px; }
+        button { padding: 10px 15px; font-size: 14px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .btn-sim { background: #6c757d; }
+        .btn-sim:hover { background: #5a6268; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Smart Energy Meter</h2>
+    
+    <div id="statusBox" class="status-box offline">Connecting to Cloud...</div>
+
+    <div class="grid">
+        <div class="card">
+            <h3>Voltage</h3>
+            <p id="voltage">-- V</p>
+        </div>
+        <div class="card">
+            <h3>Current</h3>
+            <p id="current">-- A</p>
+        </div>
+        <div class="card">
+            <h3>Power</h3>
+            <p id="power">-- W</p>
+        </div>
+        <div class="card">
+            <h3>Total Energy</h3>
+            <p id="energy">-- kWh</p>
+        </div>
+        <div class="card" style="grid-column: span 2; border-left-color: #28a745;">
+            <h3>Calculated Bill</h3>
+            <p id="bill">₦--.--</p>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn-sim" onclick="toggleSimulator()">Toggle Test Simulator</button>
+    </div>
+</div>
+
+<!-- Firebase SDK Imports -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    // Your Firebase Project Configuration
+    const firebaseConfig = {
+        databaseURL: "https://ralph-meter-default-rtdb.europe-west1.firebasedatabase.app"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    let simulatorActive = false;
+    let simEnergy = 12.450;
+    let simFault = false;
+
+    // Listen to /meter_data node in Realtime Database
+    const meterRef = ref(db, 'meter_data');
+    
+    onValue(meterRef, (snapshot) => {
+        if (simulatorActive) return; // Ignore cloud data if user toggled simulator ON
+        
+        const data = snapshot.val();
+        const statusBox = document.getElementById("statusBox");
+
+        if (data) {
+            document.getElementById("voltage").innerText = Number(data.voltage).toFixed(1) + " V";
+            document.getElementById("current").innerText = Number(data.current).toFixed(2) + " A";
+            document.getElementById("power").innerText = Number(data.power).toFixed(0) + " W";
+            document.getElementById("energy").innerText = Number(data.energy_kwh).toFixed(3) + " kWh";
+            document.getElementById("bill").innerText = "₦" + Number(data.total_bill).toFixed(2);
+
+            if (data.status && data.status !== "NORMAL") {
+                statusBox.className = "status-box alert";
+                statusBox.innerText = "FAULT: " + data.status;
+            } else {
+                statusBox.className = "status-box normal";
+                statusBox.innerText = "System Status: NORMAL (" + (data.tariff_band || "Band A") + ")";
+            }
+        } else {
+            statusBox.className = "status-box offline";
+            statusBox.innerText = "Waiting for ESP32 Data Stream...";
+        }
+    }, (error) => {
+        console.error("Firebase read error:", error);
+        document.getElementById("statusBox").className = "status-box alert";
+        document.getElementById("statusBox").innerText = "Cloud Connection Error";
+    });
+
+    // Simulator Logic for offline testing
+    window.toggleSimulator = function() {
+        simulatorActive = !simulatorActive;
+        const statusBox = document.getElementById("statusBox");
+        
+        if (simulatorActive) {
+            alert("Simulator Mode Activated. Data is now mocked locally.");
+        } else {
+            alert("Simulator Mode Deactivated. Reconnecting to Firebase live stream.");
+        }
+    }
+
+    setInterval(() => {
+        if (!simulatorActive) return;
+        simEnergy += 0.001;
+        let v = (230 + Math.random() * 3).toFixed(1);
+        let c = (4.2 + Math.random() * 0.5).toFixed(2);
+        let p = (v * c).toFixed(0);
+        let b = simEnergy * 209.50;
+
+        document.getElementById("voltage").innerText = v + " V";
+        document.getElementById("current").innerText = c + " A";
+        document.getElementById("power").innerText = p + " W";
+        document.getElementById("energy").innerText = simEnergy.toFixed(3) + " kWh";
+        document.getElementById("bill").innerText = "₦" + b.toFixed(2);
+        document.getElementById("statusBox").className = "status-box offline";
+        document.getElementById("statusBox").innerText = "SIMULATOR MODE (Offline)";
+    }, 2000);
+</script>
+
+</body>
+</html>
